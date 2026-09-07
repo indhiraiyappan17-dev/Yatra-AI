@@ -9,35 +9,6 @@ app.use(cors());
 app.use(express.json());
 
 /* =========================================================
-   HELPER
-========================================================= */
-
-function getFallbackImage(type = "place") {
-  const normalizedType = String(type).toLowerCase();
-
-  if (
-    normalizedType.includes("hotel") ||
-    normalizedType.includes("guest_house") ||
-    normalizedType.includes("hostel")
-  ) {
-    return "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=1000&q=80";
-  }
-
-  if (
-    normalizedType.includes("restaurant") ||
-    normalizedType.includes("fast_food")
-  ) {
-    return "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1000&q=80";
-  }
-
-  if (normalizedType.includes("cafe")) {
-    return "https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=1000&q=80";
-  }
-
-  return "https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=1000&q=80";
-}
-
-/* =========================================================
    HEALTH CHECK
 ========================================================= */
 
@@ -191,6 +162,7 @@ app.get("/api/places", async (req, res) => {
           address:
             tags["addr:street"] ||
             tags["addr:city"] ||
+            tags["addr:full"] ||
             "",
 
           website:
@@ -201,6 +173,19 @@ app.get("/api/places", async (req, res) => {
           phone:
             tags.phone ||
             tags["contact:phone"] ||
+            "",
+
+          image:
+            tags.image ||
+            tags["image:0"] ||
+            "",
+
+          wikipedia:
+            tags.wikipedia ||
+            "",
+
+          wikimedia_commons:
+            tags.wikimedia_commons ||
             "",
         };
       })
@@ -227,13 +212,234 @@ app.get("/api/places", async (req, res) => {
 });
 
 /* =========================================================
-   REAL PLACE IMAGE SEARCH
-   Uses Wikimedia Commons
+   TEXT NORMALIZATION
+========================================================= */
+
+function normalizeText(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[_\-:;,.()[\]{}'"`]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/* =========================================================
+   BUSINESS PLACE CHECK
+========================================================= */
+
+function isBusinessType(type) {
+  const normalizedType = normalizeText(type);
+
+  return (
+    normalizedType.includes("hotel") ||
+    normalizedType.includes("resort") ||
+    normalizedType.includes("hostel") ||
+    normalizedType.includes("guest house") ||
+    normalizedType.includes("motel") ||
+    normalizedType.includes("restaurant") ||
+    normalizedType.includes("cafe") ||
+    normalizedType.includes("fast food")
+  );
+}
+
+/* =========================================================
+   EXACT IMAGE TITLE MATCH
+
+   For hotels/restaurants/cafes:
+   require a much stronger match.
+
+   This prevents:
+
+   Hotel Rockfort View
+        ↓
+   Rockfort Ucchi Pillayar Temple
+
+   from being accepted.
+========================================================= */
+
+function isVerifiedPlaceMatch(title, placeName, type) {
+  const normalizedTitle = normalizeText(title);
+  const normalizedPlace = normalizeText(placeName);
+
+  if (!normalizedTitle || !normalizedPlace) {
+    return false;
+  }
+
+  const business = isBusinessType(type);
+
+  /* -------------------------------------------------------
+     BUSINESS PLACES
+
+     Hotels/restaurants usually do not have reliable
+     Wikimedia images.
+
+     Therefore require the complete place name.
+  ------------------------------------------------------- */
+
+  if (business) {
+    const exactName = normalizedPlace;
+
+    if (!normalizedTitle.includes(exactName)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /* -------------------------------------------------------
+     TOURIST PLACES
+
+     Tourist attractions can have slightly different
+     Wikipedia/Wikimedia naming.
+  ------------------------------------------------------- */
+
+  if (normalizedTitle.includes(normalizedPlace)) {
+    return true;
+  }
+
+  const words = normalizedPlace
+    .split(" ")
+    .filter((word) => word.length >= 3);
+
+  if (words.length === 0) {
+    return false;
+  }
+
+  const matchedWords = words.filter((word) =>
+    normalizedTitle.includes(word)
+  );
+
+  if (words.length <= 2) {
+    return matchedWords.length === words.length;
+  }
+
+  return (
+    matchedWords.length >=
+    Math.ceil(words.length * 0.8)
+  );
+}
+
+/* =========================================================
+   CATEGORY SAFETY
+========================================================= */
+
+function isCategoryCompatible(title, type) {
+  const text = normalizeText(title);
+  const normalizedType = normalizeText(type);
+
+  const hotelWords = [
+    "hotel",
+    "resort",
+    "hostel",
+    "guest house",
+    "motel",
+    "inn",
+    "lodge",
+  ];
+
+  const foodWords = [
+    "restaurant",
+    "cafe",
+    "coffee",
+    "food",
+    "dining",
+    "bakery",
+    "bar",
+  ];
+
+  const touristWords = [
+    "temple",
+    "church",
+    "mosque",
+    "museum",
+    "palace",
+    "fort",
+    "monument",
+    "memorial",
+    "park",
+    "beach",
+    "waterfall",
+    "viewpoint",
+    "tower",
+    "lake",
+    "dam",
+    "sanctuary",
+    "zoo",
+    "cathedral",
+    "shrine",
+  ];
+
+  const isHotel =
+    normalizedType.includes("hotel") ||
+    normalizedType.includes("resort") ||
+    normalizedType.includes("hostel") ||
+    normalizedType.includes("guest house") ||
+    normalizedType.includes("motel");
+
+  const isFood =
+    normalizedType.includes("restaurant") ||
+    normalizedType.includes("cafe") ||
+    normalizedType.includes("fast food");
+
+  const titleLooksTourist =
+    touristWords.some((word) =>
+      text.includes(word)
+    );
+
+  const titleLooksHotel =
+    hotelWords.some((word) =>
+      text.includes(word)
+    );
+
+  const titleLooksFood =
+    foodWords.some((word) =>
+      text.includes(word)
+    );
+
+  /* Hotel cannot receive tourist attraction image. */
+  if (isHotel && titleLooksTourist) {
+    return false;
+  }
+
+  /* Food cannot receive tourist attraction image. */
+  if (isFood && titleLooksTourist) {
+    return false;
+  }
+
+  /* Hotel should not receive restaurant image. */
+  if (isHotel && titleLooksFood) {
+    return false;
+  }
+
+  /* Restaurant should not receive hotel image. */
+  if (isFood && titleLooksHotel) {
+    return false;
+  }
+
+  return true;
+}
+
+/* =========================================================
+   IMAGE SEARCH
+   Wikimedia Commons + Wikipedia
+
+   IMPORTANT:
+   No generic fallback image.
+
+   If the image cannot be verified,
+   image = null.
 ========================================================= */
 
 app.get("/api/image", async (req, res) => {
   const query = String(req.query.q || "").trim();
-  const type = String(req.query.type || "place").trim();
+
+  const type = String(
+    req.query.type || "place"
+  ).trim();
+
+  const destination = String(
+    req.query.destination || ""
+  ).trim();
 
   if (!query) {
     return res.status(400).json({
@@ -242,35 +448,113 @@ app.get("/api/image", async (req, res) => {
     });
   }
 
+  /* -------------------------------------------------------
+     Extract the actual place name.
+
+     Example:
+
+     "Hotel Rockfort View hotel Trichy"
+
+     becomes approximately:
+
+     "Rockfort View Trichy"
+  ------------------------------------------------------- */
+
+  let placeName = query;
+
+  const categoryPattern =
+    /\b(hotel|restaurant|cafe|viewpoint|attraction|museum|place|fast_food|guest_house|hostel|resort|motel)\b/gi;
+
+  placeName = placeName
+    .replace(categoryPattern, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  /*
+     Remove destination from the place name only if
+     it was added by the frontend as a separate part.
+  */
+
+  if (destination) {
+    const destinationWords =
+      normalizeText(destination)
+        .split(" ")
+        .filter((word) => word.length >= 3);
+
+    let possibleName = placeName;
+
+    for (const word of destinationWords) {
+      const regex = new RegExp(
+        `\\b${word}\\b`,
+        "gi"
+      );
+
+      possibleName = possibleName
+        .replace(regex, " ");
+    }
+
+    possibleName = possibleName
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (possibleName.length >= 3) {
+      placeName = possibleName;
+    }
+  }
+
+  console.log(
+    `Image search started: "${placeName}" | type="${type}" | destination="${destination}"`
+  );
+
+  /* =======================================================
+     BUSINESS PLACES
+
+     Do NOT perform broad Wikimedia searching.
+
+     This is the most important fix.
+
+     A generic Wikimedia search is likely to return:
+       Rockfort Temple
+       Rockfort Monument
+       Rockfort Fort
+
+     when searching:
+       Hotel Rockfort View
+
+     So for business places we require an exact title
+     match and only search the exact phrase.
+  ======================================================= */
+
+  const business = isBusinessType(type);
+
+  const searchQueries = [];
+
+  if (business) {
+    searchQueries.push(`"${placeName}"`);
+  } else {
+    if (destination) {
+      searchQueries.push(
+        `"${placeName}" "${destination}"`
+      );
+    }
+
+    searchQueries.push(`"${placeName}"`);
+    searchQueries.push(placeName);
+  }
+
+  /* =======================================================
+     1. WIKIMEDIA COMMONS
+  ======================================================= */
+
   try {
-    /*
-      We try multiple search queries.
-
-      Example:
-      "Vivekananda Rock Memorial attraction"
-      "Vivekananda Rock Memorial"
-      "Kanyakumari tourism"
-    */
-
-    const searchQueries = [
-      query,
-      query.replace(/\b(attraction|hotel|restaurant|cafe|viewpoint)\b/gi, "").trim(),
-    ];
-
-    let imageUrl = null;
-
     for (const searchQuery of searchQueries) {
-      if (!searchQuery) {
-        continue;
-      }
-
       const url =
         "https://commons.wikimedia.org/w/api.php" +
         "?action=query" +
         "&generator=search" +
         `&gsrsearch=${encodeURIComponent(searchQuery)}` +
         "&gsrnamespace=6" +
-        "&gsrlimit=3" +
+        "&gsrlimit=20" +
         "&prop=imageinfo" +
         "&iiprop=url" +
         "&iiurlwidth=1000" +
@@ -279,7 +563,8 @@ app.get("/api/image", async (req, res) => {
 
       const response = await fetch(url, {
         headers: {
-          "User-Agent": "YatraAI-Tourism-App/1.0",
+          "User-Agent":
+            "YatraAI-Tourism-App/1.0",
         },
       });
 
@@ -295,57 +580,163 @@ app.get("/api/image", async (req, res) => {
         continue;
       }
 
-      const pageList = Object.values(pages);
+      const pageList =
+        Object.values(pages);
 
       for (const page of pageList) {
-        const info = page?.imageinfo?.[0];
+        const title =
+          String(page.title || "");
 
-        const candidate =
+        if (
+          !isCategoryCompatible(
+            title,
+            type
+          )
+        ) {
+          continue;
+        }
+
+        if (
+          !isVerifiedPlaceMatch(
+            title,
+            placeName,
+            type
+          )
+        ) {
+          continue;
+        }
+
+        const info =
+          page.imageinfo?.[0];
+
+        const imageUrl =
           info?.thumburl ||
           info?.url ||
           null;
 
-        if (candidate) {
-          imageUrl = candidate;
-          break;
+        if (!imageUrl) {
+          continue;
         }
-      }
 
-      if (imageUrl) {
-        break;
+        console.log(
+          `VERIFIED Wikimedia image: ${title}`
+        );
+
+        return res.json({
+          success: true,
+          image: imageUrl,
+          source: "Wikimedia Commons",
+        });
       }
     }
-
-    /*
-      If Wikimedia doesn't have an image,
-      return a category-based fallback.
-    */
-
-    if (!imageUrl) {
-      imageUrl = getFallbackImage(type);
-    }
-
-    res.json({
-      success: true,
-      image: imageUrl,
-      source: imageUrl.includes("wikimedia")
-        ? "Wikimedia Commons"
-        : "Fallback",
-    });
   } catch (error) {
-    console.error("Image search error:", error);
-
-    /*
-      Even if Wikimedia fails completely,
-      the frontend still receives an image.
-    */
-
-    res.json({
-      success: true,
-      image: getFallbackImage(type),
-      source: "Fallback",
-    });
+    console.error(
+      "Wikimedia image error:",
+      error.message
+    );
   }
+
+  /* =======================================================
+     2. WIKIPEDIA
+  ======================================================= */
+
+  try {
+    for (const searchQuery of searchQueries) {
+      const url =
+        "https://en.wikipedia.org/w/api.php" +
+        "?action=query" +
+        "&generator=search" +
+        `&gsrsearch=${encodeURIComponent(searchQuery)}` +
+        "&gsrlimit=10" +
+        "&prop=pageimages" +
+        "&piprop=thumbnail" +
+        "&pithumbsize=1000" +
+        "&format=json" +
+        "&origin=*";
+
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent":
+            "YatraAI-Tourism-App/1.0",
+        },
+      });
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const data = await response.json();
+
+      const pages = data.query?.pages;
+
+      if (!pages) {
+        continue;
+      }
+
+      const pageList =
+        Object.values(pages);
+
+      for (const page of pageList) {
+        const title =
+          String(page.title || "");
+
+        if (
+          !isCategoryCompatible(
+            title,
+            type
+          )
+        ) {
+          continue;
+        }
+
+        if (
+          !isVerifiedPlaceMatch(
+            title,
+            placeName,
+            type
+          )
+        ) {
+          continue;
+        }
+
+        const thumbnail =
+          page.thumbnail?.source;
+
+        if (!thumbnail) {
+          continue;
+        }
+
+        console.log(
+          `VERIFIED Wikipedia image: ${title}`
+        );
+
+        return res.json({
+          success: true,
+          image: thumbnail,
+          source: "Wikipedia",
+        });
+      }
+    }
+  } catch (error) {
+    console.error(
+      "Wikipedia image error:",
+      error.message
+    );
+  }
+
+  /* =======================================================
+     3. NO VERIFIED IMAGE
+  ======================================================= */
+
+  console.log(
+    `NO VERIFIED IMAGE: ${placeName}`
+  );
+
+  return res.json({
+    success: true,
+    image: null,
+    source: "No verified image available",
+  });
 });
 
 /* =========================================================
@@ -360,7 +751,8 @@ app.get("/api/weather", async (req, res) => {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
     return res.status(400).json({
       success: false,
-      error: "Valid latitude and longitude are required.",
+      error:
+        "Valid latitude and longitude are required.",
     });
   }
 
@@ -375,7 +767,9 @@ app.get("/api/weather", async (req, res) => {
     const response = await fetch(url);
 
     if (!response.ok) {
-      throw new Error("Weather API request failed.");
+      throw new Error(
+        "Weather API request failed."
+      );
     }
 
     const data = await response.json();
@@ -385,11 +779,15 @@ app.get("/api/weather", async (req, res) => {
       weather: data.current,
     });
   } catch (error) {
-    console.error("Weather API error:", error);
+    console.error(
+      "Weather API error:",
+      error
+    );
 
     res.status(500).json({
       success: false,
-      error: "Unable to load weather information.",
+      error:
+        "Unable to load weather information.",
     });
   }
 });

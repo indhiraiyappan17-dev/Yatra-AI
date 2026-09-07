@@ -10,6 +10,10 @@ import {
   Wallet,
   Loader2,
   ImageOff,
+  Phone,
+  Globe,
+  Compass,
+  ArrowRight,
 } from "lucide-react";
 
 type SearchResult = {
@@ -28,6 +32,9 @@ type Place = {
   address?: string;
   website?: string;
   phone?: string;
+  image?: string | null;
+  wikipedia?: string;
+  wikimedia_commons?: string;
 };
 
 type PlaceWithImage = Place & {
@@ -45,18 +52,10 @@ const API_BASE = "http://localhost:5000";
 function App() {
   const [destination, setDestination] = useState("");
   const [searching, setSearching] = useState(false);
-
-  const [searchResult, setSearchResult] =
-    useState<SearchResult | null>(null);
-
+  const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [places, setPlaces] = useState<PlaceWithImage[]>([]);
-
   const [error, setError] = useState("");
   const [imagesLoading, setImagesLoading] = useState(false);
-
-  /* =====================================================
-     SEARCH DESTINATION
-  ===================================================== */
 
   const handleSearch = async () => {
     if (!destination.trim()) {
@@ -70,8 +69,6 @@ function App() {
     setPlaces([]);
 
     try {
-      /* Find destination */
-
       const searchResponse = await fetch(
         `${API_BASE}/api/search?q=${encodeURIComponent(
           destination.trim()
@@ -88,8 +85,6 @@ function App() {
 
       setSearchResult(searchData);
 
-      /* Find nearby real places */
-
       const placesResponse = await fetch(
         `${API_BASE}/api/places?lat=${searchData.lat}&lon=${searchData.lon}`
       );
@@ -98,19 +93,18 @@ function App() {
 
       if (!placesResponse.ok) {
         throw new Error(
-          placesData.error ||
-            "Unable to load nearby places."
+          placesData.error || "Unable to load nearby places."
         );
       }
 
-      const realPlaces: PlaceWithImage[] =
-        placesData.places || [];
+      const realPlaces: PlaceWithImage[] = placesData.places || [];
 
       setPlaces(realPlaces);
 
-      /* Load images */
-
-      await loadPlaceImages(realPlaces);
+      await loadPlaceImages(
+        realPlaces,
+        searchData.name || destination.trim()
+      );
     } catch (error) {
       console.error("Search error:", error);
 
@@ -122,63 +116,74 @@ function App() {
     }
   };
 
-  /* =====================================================
-     LOAD REAL IMAGES
-  ===================================================== */
-
   const loadPlaceImages = async (
-    placesToLoad: PlaceWithImage[]
+    placesToLoad: PlaceWithImage[],
+    destinationName: string
   ) => {
     setImagesLoading(true);
-
     try {
-      const updatedPlaces = await Promise.all(
-        placesToLoad.map(async (place) => {
-          try {
-            const query = `${place.name} ${place.type}`;
+      const updatedPlaces: PlaceWithImage[] = [];
 
-            const response = await fetch(
-              `${API_BASE}/api/image?q=${encodeURIComponent(
-                query
-              )}&type=${encodeURIComponent(place.type)}`
-            );
+      for (const place of placesToLoad) {
+        try {
+          if (place.image) {
+            updatedPlaces.push(place);
+            continue;
+          }
 
-            if (!response.ok) {
-              return {
-                ...place,
-                image: null,
-              };
-            }
+          const query = [
+            place.name,
+            place.type.replace(/_/g, " "),
+            destinationName,
+          ]
+            .filter(Boolean)
+            .join(" ");
 
-            const data = await response.json();
+          const response = await fetch(
+            `${API_BASE}/api/image?q=${encodeURIComponent(
+              query
+            )}&type=${encodeURIComponent(
+              place.type
+            )}&destination=${encodeURIComponent(
+              destinationName
+            )}`
+          );
 
-            return {
-              ...place,
-              image: data.image || null,
-            };
-          } catch (error) {
-            console.error(
-              `Image loading failed for ${place.name}:`,
-              error
-            );
-
-            return {
+          if (!response.ok) {
+            updatedPlaces.push({
               ...place,
               image: null,
-            };
+            });
+
+            continue;
           }
-        })
-      );
+
+          const data = await response.json();
+
+          updatedPlaces.push({
+            ...place,
+            image: data.image || null,
+          });
+        } catch (imageError) {
+          console.error(
+            `Image loading failed for ${place.name}:`,
+            imageError
+          );
+
+          updatedPlaces.push({
+            ...place,
+            image: null,
+          });
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
 
       setPlaces(updatedPlaces);
     } finally {
       setImagesLoading(false);
     }
   };
-
-  /* =====================================================
-     CATEGORIES
-  ===================================================== */
 
   const touristPlaces = places.filter((place) =>
     [
@@ -212,588 +217,531 @@ function App() {
       place.type === "fast_food"
   );
 
-  const cafes = places.filter(
-    (place) => place.type === "cafe"
-  );
+  const cafes = places.filter((place) => place.type === "cafe");
 
   return (
-    <main className="min-h-screen bg-slate-50">
-      {/* =================================================
-          NAVBAR
-      ================================================= */}
+    <main className="relative min-h-screen bg-gradient-to-b from-[#F0F9FF] via-[#E0F2FE] to-[#F8FAFC] text-[#0F172A] font-sans selection:bg-[#00B4D8] selection:text-white overflow-x-hidden">
+      {/* KANYAKUMARI CINEMATIC HERO SECTION */}
+      <section className="relative min-h-[90vh] w-full flex flex-col justify-between overflow-hidden bg-[#0A192F]">
+        {/* HERO BACKGROUND IMAGE LAYER */}
+        <div 
+          className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat transition-all duration-1000 scale-105"
+          style={{
+            backgroundImage: `
+              linear-gradient(180deg, rgba(10, 25, 47, 0.4) 0%, rgba(10, 25, 47, 0.25) 40%, rgba(10, 25, 47, 0.85) 100%),
+              linear-gradient(90deg, rgba(10, 25, 47, 0.5) 0%, rgba(10, 25, 47, 0) 35%, rgba(10, 25, 47, 0) 65%, rgba(10, 25, 47, 0.4) 100%),
+              url('public/t.jpg'),
+            
+            `
+          }}
+        />
 
-      <nav className="border-b bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2">
-            <div className="rounded-lg bg-sky-600 p-2">
-              <MapPin className="h-5 w-5 text-white" />
+        {/* FLOATING GLASS NAVIGATION BAR */}
+        <nav className="relative z-20 px-4 pt-6 sm:px-8">
+          <div className="mx-auto flex max-w-7xl items-center justify-between rounded-full border border-white/30 bg-white/20 px-8 py-3.5 shadow-2xl backdrop-blur-xl">
+            <div className="flex items-center gap-3 cursor-pointer group">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-tr from-[#0077B6] to-[#00B4D8] text-white shadow-md shadow-[#00B4D8]/30 transition duration-300 group-hover:scale-105">
+                <Compass className="h-5 w-5 text-white" />
+              </div>
+
+              <span className="text-2xl font-black tracking-tight text-white drop-shadow-md">
+                Yatra<span className="text-[#00F0FF]">AI</span>
+              </span>
             </div>
 
-            <span className="text-xl font-bold text-slate-900">
-              YatraAI
-            </span>
-          </div>
-
-          <div className="hidden gap-6 text-sm font-medium text-slate-600 md:flex">
-            <a
-              href="#places"
-              className="hover:text-sky-600"
-            >
-              Explore
-            </a>
-
-            <a
-              href="#hotels"
-              className="hover:text-sky-600"
-            >
-              Hotels
-            </a>
-
-            <a
-              href="#restaurants"
-              className="hover:text-sky-600"
-            >
-              Restaurants
-            </a>
-
-            <a
-              href="#features"
-              className="hover:text-sky-600"
-            >
-              Trip Planner
-            </a>
-          </div>
-
-          <button
-            type="button"
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-          >
-            Sign In
-          </button>
-        </div>
-      </nav>
-
-      {/* =================================================
-          HERO
-      ================================================= */}
-
-      <section className="bg-gradient-to-b from-sky-50 to-white">
-        <div className="mx-auto max-w-7xl px-6 py-20 text-center">
-          <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-sky-100 px-4 py-2 text-sm font-semibold text-sky-700">
-            <Sparkles className="h-4 w-4" />
-            AI-Powered Travel Assistant
-          </div>
-
-          <h1 className="mx-auto max-w-4xl text-4xl font-bold tracking-tight text-slate-900 sm:text-6xl">
-            Your Journey.
-            <br />
-
-            <span className="text-sky-600">
-              Your Plan. Your AI.
-            </span>
-          </h1>
-
-          <p className="mx-auto mt-6 max-w-2xl text-lg leading-8 text-slate-600">
-            Search any destination and discover real
-            tourist places, accommodation, restaurants,
-            weather, routes, budgets and AI-powered travel
-            guidance in one place.
-          </p>
-
-          {/* SEARCH */}
-
-          <div className="mx-auto mt-10 flex max-w-3xl flex-col gap-3 rounded-2xl bg-white p-3 shadow-xl ring-1 ring-slate-200 sm:flex-row">
-            <div className="flex flex-1 items-center gap-3 px-4">
-              <Search className="h-5 w-5 text-slate-400" />
-
-              <input
-                type="text"
-                placeholder="Where do you want to go?"
-                value={destination}
-                onChange={(event) => {
-                  setDestination(event.target.value);
-                  setError("");
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    handleSearch();
-                  }
-                }}
-                className="w-full bg-transparent py-3 outline-none placeholder:text-slate-400"
-              />
+            <div className="hidden items-center gap-8 text-sm font-bold text-white/90 drop-shadow md:flex">
+              <a href="#places" className="transition-colors hover:text-[#00F0FF]">
+                Explore
+              </a>
+              <a href="#hotels" className="transition-colors hover:text-[#00F0FF]">
+                Hotels
+              </a>
+              <a href="#restaurants" className="transition-colors hover:text-[#00F0FF]">
+                Restaurants
+              </a>
+              <a href="#features" className="transition-colors hover:text-[#00F0FF]">
+                Trip Planner
+              </a>
             </div>
 
             <button
               type="button"
-              onClick={handleSearch}
-              disabled={searching}
-              className="flex items-center justify-center gap-2 rounded-xl bg-sky-600 px-7 py-3 font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-full bg-white/20 hover:bg-white/30 border border-white/40 px-6 py-2.5 text-sm font-bold text-white shadow-lg backdrop-blur-md transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
             >
-              {searching ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <Search className="h-5 w-5" />
-              )}
-
-              {searching ? "Searching..." : "Explore"}
+              Sign In
             </button>
           </div>
+        </nav>
 
-          <p className="mt-4 text-sm text-slate-500">
-            Example: Chennai, Madurai, Kanyakumari, Ooty, Goa
+        {/* HERO MAIN CONTENT */}
+        <div className="relative z-10 mx-auto flex max-w-5xl flex-col items-center justify-center px-6 py-12 text-center my-auto">
+          {/* Glassmorphism AI Badge */}
+          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/40 bg-white/20 px-5 py-2 text-xs font-extrabold tracking-wide text-white shadow-lg backdrop-blur-md">
+            <Sparkles className="h-4 w-4 text-[#00F0FF] animate-pulse" />
+            AI-Powered Travel Assistant
+          </div>
+
+          {/* Heading */}
+          <h1 className="mx-auto max-w-4xl text-5xl font-black tracking-tight text-white sm:text-6xl md:text-7xl drop-shadow-xl">
+            Your Journey.
+            <br />
+            Your Plan. <span className="text-[#00F0FF] drop-shadow-[0_4px_16px_rgba(0,240,255,0.7)]">Your AI.</span>
+          </h1>
+
+          {/* Subtitle Description */}
+          <p className="mx-auto mt-6 max-w-2xl text-base font-medium leading-relaxed text-slate-100 drop-shadow-md sm:text-lg">
+            Search any destination and discover real tourist places, accommodation, restaurants, weather, routes, budgets and AI-powered travel guidance in one place.
           </p>
 
+          {/* PREMIUM SEARCH BOX CONTAINER */}
+          <div className="mx-auto mt-10 w-full max-w-3xl">
+            <div className="relative flex flex-col gap-3 rounded-full border border-white/60 bg-white/90 p-2.5 shadow-2xl backdrop-blur-xl ring-1 ring-white/50 sm:flex-row sm:items-center">
+              <div className="flex flex-1 items-center gap-3.5 px-5">
+                <MapPin className="h-6 w-6 text-[#00B4D8] shrink-0" />
+
+                <input
+                  type="text"
+                  placeholder="Where do you want to go?"
+                  value={destination}
+                  onChange={(event) => {
+                    setDestination(event.target.value);
+                    setError("");
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      handleSearch();
+                    }
+                  }}
+                  className="w-full bg-transparent py-3 text-base font-bold text-[#0F172A] outline-none placeholder:text-slate-400"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSearch}
+                disabled={searching}
+                className="flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#00B4D8] to-[#0077B6] px-9 py-3.5 text-base font-bold text-white shadow-lg shadow-[#00B4D8]/40 transition-all duration-300 hover:opacity-95 hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {searching ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-white" />
+                ) : (
+                  <Search className="h-5 w-5" />
+                )}
+
+                {searching ? "Searching..." : "Explore"}
+              </button>
+            </div>
+
+            {/* Quick Suggestions */}
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs font-semibold text-white drop-shadow-md">
+              <span className="opacity-90">Popular Destinations:</span>
+              {["Chennai", "Madurai", "Kanyakumari", "Ooty", "Goa"].map((city) => (
+                <button
+                  key={city}
+                  type="button"
+                  onClick={() => {
+                    setDestination(city);
+                    setError("");
+                  }}
+                  className="rounded-full bg-white/20 border border-white/30 px-3.5 py-1 text-white backdrop-blur-md transition-all hover:bg-white hover:text-[#0F172A] hover:scale-105"
+                >
+                  {city}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {error && (
-            <div className="mx-auto mt-6 max-w-2xl rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-600">
+            <div className="mx-auto mt-6 max-w-xl rounded-2xl border border-red-400 bg-red-600/80 p-4 text-sm font-bold text-white shadow-xl backdrop-blur-md">
               {error}
             </div>
           )}
         </div>
+
+        {/* SMOOTH CURVED WAVE TRANSITION */}
+        <div className="pointer-events-none relative w-full leading-none z-10">
+          <svg 
+            className="relative block w-full h-16 sm:h-20 text-[#F0F9FF]" 
+            viewBox="0 0 1200 120" 
+            preserveAspectRatio="none"
+          >
+            <path 
+              d="M0,0 C150,90 350,-40 500,65 C650,170 900,10 1200,40 L1200,120 L0,120 Z" 
+              fill="currentColor"
+            ></path>
+          </svg>
+        </div>
       </section>
 
-      {/* =================================================
-          SEARCH RESULT
-      ================================================= */}
-
+      {/* SEARCH RESULTS & TRAVEL DASHBOARD */}
       {searchResult && (
-        <section className="mx-auto max-w-7xl px-6 py-12">
-          {/* DESTINATION */}
+        <section className="relative py-12">
+          {/* Subtle Background Glows */}
+          <div className="pointer-events-none absolute left-10 top-20 h-96 w-96 rounded-full bg-[#00B4D8]/15 blur-3xl" />
+          <div className="pointer-events-none absolute right-10 top-1/2 h-96 w-96 rounded-full bg-sky-300/20 blur-3xl" />
 
-          <div className="rounded-3xl bg-white p-8 shadow-lg ring-1 ring-slate-200">
-            <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+          <div className="relative mx-auto max-w-7xl px-6">
+            {/* DESTINATION HEADER & STAT CARDS */}
+            <div className="mb-14 flex flex-col justify-between gap-8 lg:flex-row lg:items-center">
               <div>
-                <p className="text-sm font-semibold uppercase tracking-widest text-sky-600">
-                  Destination Found
-                </p>
+                <div className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-wider text-[#00B4D8]">
+                  <MapPin className="h-4 w-4" />
+                  DESTINATION OVERVIEW
+                </div>
 
-                <h2 className="mt-2 text-3xl font-bold text-slate-900">
-                  {searchResult.name || destination}
+                <h2 className="mt-1 text-4xl font-black tracking-tight text-[#0F172A] sm:text-5xl">
+                  Explore <span className="bg-gradient-to-r from-[#0077B6] to-[#00B4D8] bg-clip-text text-transparent">{searchResult.name}</span>
                 </h2>
 
-                <p className="mt-2 max-w-3xl text-slate-500">
+                <p className="mt-2 max-w-xl text-sm font-medium text-slate-500">
                   {searchResult.display_name}
                 </p>
               </div>
 
-              <div className="flex items-center gap-2 rounded-xl bg-sky-50 px-4 py-3 text-sm font-medium text-sky-700">
-                <MapPin className="h-5 w-5" />
-                Real location data
+              {/* STAT CARDS */}
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <StatCard
+                  icon={<MapPin className="h-5 w-5" />}
+                  label="Tourist Places"
+                  value={touristPlaces.length}
+                />
+                <StatCard
+                  icon={<Hotel className="h-5 w-5" />}
+                  label="Hotels"
+                  value={hotels.length}
+                />
+                <StatCard
+                  icon={<Utensils className="h-5 w-5" />}
+                  label="Restaurants"
+                  value={restaurants.length}
+                />
+                <StatCard
+                  icon={<CloudSun className="h-5 w-5" />}
+                  label="Cafes"
+                  value={cafes.length}
+                />
               </div>
             </div>
-          </div>
 
-          {/* IMAGE LOADING */}
+            {/* TOURIST PLACES SECTION */}
+            <section id="places" className="mb-20">
+              <SectionHeader
+                title="Tourist Places"
+                description="Real attraction places found near your destination."
+              />
 
-          {imagesLoading && (
-            <div className="mt-8 flex items-center justify-center gap-2 rounded-xl bg-white py-5 text-sm text-slate-500 shadow-sm">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              Finding real images...
-            </div>
-          )}
-
-          {/* =================================================
-              TOURIST PLACES
-          ================================================= */}
-
-          <div id="places" className="mt-12">
-            <SectionTitle
-              icon={<MapPin className="h-6 w-6" />}
-              title="Tourist Places"
-              description="Real places found near your destination."
-            />
-
-            {touristPlaces.length > 0 ? (
-              <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                {touristPlaces
-                  .slice(0, 12)
-                  .map((place) => (
-                    <PlaceCard
-                      key={`${place.id}-${place.name}`}
-                      place={place}
-                    />
+              {touristPlaces.length > 0 ? (
+                <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+                  {touristPlaces.slice(0, 12).map((place) => (
+                    <PlaceCard key={place.id} place={place} />
                   ))}
-              </div>
-            ) : (
-              <EmptyMessage
-                message="No tourist attractions were found in the available OpenStreetMap data."
+                </div>
+              ) : (
+                <EmptyState message="No tourist places found in this area." />
+              )}
+            </section>
+
+            {/* HOTELS SECTION */}
+            <section id="hotels" className="mb-20">
+              <SectionHeader
+                title="Hotels & Accommodation"
+                description="Real accommodation places found nearby."
               />
-            )}
-          </div>
 
-          {/* =================================================
-              HOTELS
-          ================================================= */}
-
-          <div id="hotels" className="mt-14">
-            <SectionTitle
-              icon={<Hotel className="h-6 w-6" />}
-              title="Accommodation"
-              description="Real hotels and accommodation available nearby."
-            />
-
-            {hotels.length > 0 ? (
-              <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                {hotels.slice(0, 12).map((place) => (
-                  <PlaceCard
-                    key={`${place.id}-${place.name}`}
-                    place={place}
-                  />
-                ))}
-              </div>
-            ) : (
-              <EmptyMessage
-                message="No accommodation was found in the available OpenStreetMap data."
-              />
-            )}
-          </div>
-
-          {/* =================================================
-              RESTAURANTS
-          ================================================= */}
-
-          <div id="restaurants" className="mt-14">
-            <SectionTitle
-              icon={<Utensils className="h-6 w-6" />}
-              title="Restaurants"
-              description="Real restaurants and food options nearby."
-            />
-
-            {restaurants.length > 0 ? (
-              <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                {restaurants
-                  .slice(0, 12)
-                  .map((place) => (
-                    <PlaceCard
-                      key={`${place.id}-${place.name}`}
-                      place={place}
-                    />
+              {hotels.length > 0 ? (
+                <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+                  {hotels.slice(0, 12).map((place) => (
+                    <PlaceCard key={place.id} place={place} />
                   ))}
-              </div>
-            ) : (
-              <EmptyMessage
-                message="No restaurants were found in the available OpenStreetMap data."
+                </div>
+              ) : (
+                <EmptyState message="No hotels found in this area." />
+              )}
+            </section>
+
+            {/* RESTAURANTS SECTION */}
+            <section id="restaurants" className="mb-20">
+              <SectionHeader
+                title="Restaurants & Dining"
+                description="Real restaurants and food places nearby."
               />
-            )}
-          </div>
 
-          {/* =================================================
-              CAFES
-          ================================================= */}
+              {restaurants.length > 0 ? (
+                <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+                  {restaurants.slice(0, 12).map((place) => (
+                    <PlaceCard key={place.id} place={place} />
+                  ))}
+                </div>
+              ) : (
+                <EmptyState message="No restaurants found in this area." />
+              )}
+            </section>
 
-          <div className="mt-14">
-            <SectionTitle
-              icon={<Utensils className="h-6 w-6" />}
-              title="Cafes"
-              description="Nearby cafes available in the real map data."
-            />
-
-            {cafes.length > 0 ? (
-              <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                {cafes.slice(0, 9).map((place) => (
-                  <PlaceCard
-                    key={`${place.id}-${place.name}`}
-                    place={place}
-                  />
-                ))}
-              </div>
-            ) : (
-              <EmptyMessage
-                message="No cafes were found in the available OpenStreetMap data."
-              />
-            )}
-          </div>
-
-          {/* =================================================
-              MAP
-          ================================================= */}
-
-          {searchResult.lat && searchResult.lon && (
-            <div className="mt-14">
-              <SectionTitle
-                icon={<Navigation className="h-6 w-6" />}
+            {/* MAP SECTION */}
+            <section className="relative mb-12 rounded-3xl border border-white bg-white/80 p-8 shadow-xl backdrop-blur-md">
+              <SectionHeader
                 title="Explore on Map"
-                description="View your destination and nearby area."
+                description="View the searched destination and nearby places in real-time."
               />
 
-              <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+              <div className="group relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-md">
                 <iframe
-                  title="YatraAI Destination Map"
+                  title="YatraAI destination map"
                   src={`https://www.openstreetmap.org/export/embed.html?bbox=${
-                    searchResult.lon - 0.08
-                  }%2C${searchResult.lat - 0.06}%2C${
-                    searchResult.lon + 0.08
+                    Number(searchResult.lon) - 0.08
                   }%2C${
-                    searchResult.lat + 0.06
+                    Number(searchResult.lat) - 0.08
+                  }%2C${
+                    Number(searchResult.lon) + 0.08
+                  }%2C${
+                    Number(searchResult.lat) + 0.08
                   }&layer=mapnik&marker=${
                     searchResult.lat
                   }%2C${searchResult.lon}`}
-                  className="h-[450px] w-full border-0"
+                  className="h-[460px] w-full border-0 transition-opacity duration-300 group-hover:opacity-95"
                   loading="lazy"
                 />
               </div>
 
-              <a
-                href={`https://www.google.com/maps/dir/?api=1&destination=${searchResult.lat},${searchResult.lon}`}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 font-semibold text-white hover:bg-slate-700"
-              >
-                <Navigation className="h-5 w-5" />
-                Get Directions
-              </a>
-            </div>
-          )}
+              <div className="mt-5 flex justify-end">
+                <a
+                  href={`https://www.google.com/maps/search/?api=1&query=${searchResult.lat},${searchResult.lon}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2.5 rounded-full bg-[#00B4D8] px-7 py-3 text-sm font-bold text-white shadow-md transition-all duration-200 hover:bg-[#0096C7] hover:shadow-lg hover:scale-[1.01]"
+                >
+                  <Navigation className="h-4 w-4" />
+                  Open Google Maps
+                </a>
+              </div>
+            </section>
+          </div>
         </section>
       )}
 
-      {/* =================================================
-          FEATURES
-      ================================================= */}
+      {/* FEATURE CARDS */}
+      {!searchResult && (
+        <section id="features" className="relative py-24">
+          <div className="pointer-events-none absolute right-1/4 top-10 h-80 w-80 rounded-full bg-[#00B4D8]/10 blur-3xl" />
 
-      <section
-        id="features"
-        className="mx-auto max-w-7xl px-6 py-16"
-      >
-        <div className="text-center">
-          <p className="text-sm font-semibold uppercase tracking-widest text-sky-600">
-            Everything you need
-          </p>
+          <div className="relative mx-auto max-w-7xl px-6">
+            <div className="text-center">
+              <div className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest text-[#00B4D8]">
+                <Sparkles className="h-4 w-4" />
+                EVERYTHING YOU NEED
+              </div>
 
-          <h2 className="mt-2 text-3xl font-bold text-slate-900">
-            Plan your complete journey
-          </h2>
+              <h2 className="mt-2 text-3xl font-black tracking-tight text-[#0F172A] sm:text-4xl">
+                Your Complete Travel Companion
+              </h2>
 
-          <p className="mx-auto mt-3 max-w-2xl text-slate-600">
-            YatraAI brings important travel information
-            together so you do not have to search across
-            multiple websites.
-          </p>
+              <p className="mx-auto mt-4 max-w-2xl text-sm font-medium text-slate-500">
+                YatraAI brings intelligent travel planning, real-time context, and destination discovery into one unified platform.
+              </p>
+            </div>
+
+            <div className="mt-16 grid gap-8 md:grid-cols-2 lg:grid-cols-4">
+              <FeatureCard
+                icon={<CloudSun className="h-6 w-6 text-[#00B4D8]" />}
+                title="Live Weather"
+                description="Check weather information and forecasts for your upcoming destination."
+              />
+
+              <FeatureCard
+                icon={<Navigation className="h-6 w-6 text-cyan-600" />}
+                title="Routes & Maps"
+                description="Find pinpoint locations and calculate smooth travel routes effortlessly."
+              />
+
+              <FeatureCard
+                icon={<Wallet className="h-6 w-6 text-emerald-600" />}
+                title="Budget Planner"
+                description="Optimize travel expenses and plan itineraries based on your budget."
+              />
+
+              <FeatureCard
+                icon={<Sparkles className="h-6 w-6 text-amber-500" />}
+                title="AI Travel Guide"
+                description="Get personalized, intelligent travel recommendations with Gemini AI."
+              />
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* FLOATING IMAGE LOADING BADGE */}
+      {imagesLoading && searchResult && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-full border border-slate-800/80 bg-[#0F172A]/95 px-6 py-3.5 text-xs font-bold text-white shadow-2xl backdrop-blur-md">
+          <Loader2 className="h-4 w-4 animate-spin text-[#00F0FF]" />
+          Fetching high-res place photos...
         </div>
-
-        <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          <FeatureCard
-            icon={<MapPin className="h-6 w-6" />}
-            title="Tourist Places"
-            description="Discover real places to visit around your destination."
-          />
-
-          <FeatureCard
-            icon={<Hotel className="h-6 w-6" />}
-            title="Hotels"
-            description="Find real accommodation options near your destination."
-          />
-
-          <FeatureCard
-            icon={<Utensils className="h-6 w-6" />}
-            title="Restaurants"
-            description="Explore real restaurants and food options nearby."
-          />
-
-          <FeatureCard
-            icon={<CloudSun className="h-6 w-6" />}
-            title="Weather"
-            description="Check weather before planning your trip."
-          />
-
-          <FeatureCard
-            icon={<Navigation className="h-6 w-6" />}
-            title="How to Reach"
-            description="Get routes and directions for your journey."
-          />
-
-          <FeatureCard
-            icon={<Wallet className="h-6 w-6" />}
-            title="Budget Planner"
-            description="Estimate your travel expenses and plan smarter."
-          />
-
-          <FeatureCard
-            icon={<Sparkles className="h-6 w-6" />}
-            title="AI Itinerary"
-            description="Let AI create a personalized travel plan."
-          />
-
-          <FeatureCard
-            icon={<Sparkles className="h-6 w-6" />}
-            title="AI Chatbot"
-            description="Ask YatraAI anything about your trip."
-          />
-        </div>
-      </section>
-
-      {/* =================================================
-          FOOTER
-      ================================================= */}
-
-      <footer className="border-t bg-white">
-        <div className="mx-auto max-w-7xl px-6 py-8 text-center text-sm text-slate-500">
-          © 2026 YatraAI. Your Journey. Your Plan. Your AI.
-        </div>
-      </footer>
+      )}
     </main>
   );
 }
 
 /* =========================================================
-   SECTION TITLE
+SECTION HEADER COMPONENT
 ========================================================= */
-
-function SectionTitle({
-  icon,
+function SectionHeader({
   title,
   description,
 }: {
-  icon: React.ReactNode;
   title: string;
   description: string;
 }) {
   return (
-    <div className="flex items-start gap-4">
-      <div className="rounded-xl bg-sky-100 p-3 text-sky-600">
-        {icon}
-      </div>
-
+    <div className="mb-8 flex flex-col justify-between gap-2 border-l-4 border-[#00B4D8] pl-4 sm:flex-row sm:items-end">
       <div>
-        <h2 className="text-2xl font-bold text-slate-900">
+        <h3 className="text-2xl font-black tracking-tight text-[#0F172A] sm:text-3xl">
           {title}
-        </h2>
-
-        <p className="mt-1 text-slate-500">
-          {description}
-        </p>
+        </h3>
+        <p className="mt-1 text-xs font-semibold text-slate-500">{description}</p>
       </div>
     </div>
   );
 }
 
 /* =========================================================
-   PLACE CARD
+STAT CARD COMPONENT
 ========================================================= */
-
-function PlaceCard({
-  place,
+function StatCard({
+  icon,
+  label,
+  value,
 }: {
-  place: PlaceWithImage;
+  icon: React.ReactNode;
+  label: string;
+  value: number;
 }) {
-  const [imageError, setImageError] = useState(false);
+  return (
+    <div className="flex flex-col items-center justify-center rounded-2xl border border-white bg-white/80 p-5 text-center shadow-md backdrop-blur-md transition-all duration-300 hover:-translate-y-1 hover:shadow-xl">
+      <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[#E0F7FA] text-[#00B4D8]">
+        {icon}
+      </div>
+      <p className="text-2xl font-black tracking-tight text-[#0F172A]">{value}</p>
+      <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">{label}</p>
+    </div>
+  );
+}
 
-  const fallbackImage =
-    "https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=1000&q=80";
+/* =========================================================
+PLACE CARD COMPONENT
+========================================================= */
+function PlaceCard({ place }: { place: PlaceWithImage }) {
+  const [imageError, setImageError] = useState(false);
+  const imageAvailable = Boolean(place.image) && !imageError;
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-xl">
-      {/* IMAGE */}
-
-      <div className="relative h-52 w-full overflow-hidden bg-gradient-to-br from-sky-100 to-slate-100">
-        {place.image && !imageError ? (
+    <article className="group flex flex-col overflow-hidden rounded-2xl border border-white bg-white shadow-md transition-all duration-300 hover:-translate-y-1.5 hover:shadow-2xl">
+      <div className="relative h-48 w-full overflow-hidden bg-slate-100">
+        {imageAvailable ? (
           <img
-            src={place.image}
-            alt={place.name}
-            className="h-full w-full object-cover transition duration-500 hover:scale-105"
+            src={place.image || ""}
+            alt={`${place.name} photo`}
+            className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
             loading="lazy"
-            onError={() => {
-              setImageError(true);
-            }}
+            onError={() => setImageError(true)}
           />
-        ) : !imageError && !place.image ? (
-          <div className="flex h-full flex-col items-center justify-center text-slate-400">
-            <ImageOff className="h-10 w-10" />
-
-            <span className="mt-2 text-sm">
-              Image unavailable
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center bg-gradient-to-tr from-sky-50 via-slate-100 to-cyan-50 text-slate-400">
+            <ImageOff className="h-8 w-8 text-slate-400" />
+            <span className="mt-2 text-xs font-semibold text-slate-400">
+              Photo unavailable
             </span>
           </div>
-        ) : (
-          <img
-            src={fallbackImage}
-            alt="Travel destination"
-            className="h-full w-full object-cover"
-          />
         )}
 
-        <div className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold capitalize text-slate-700 shadow">
-          {place.type.replaceAll("_", " ")}
-        </div>
+        <span className="absolute left-3 top-3 rounded-full bg-[#00B4D8] px-3 py-1 text-[10px] font-extrabold capitalize tracking-wider text-white shadow-md">
+          {place.type.replace(/_/g, " ")}
+        </span>
       </div>
 
-      {/* CONTENT */}
+      <div className="flex flex-1 flex-col justify-between p-5">
+        <div>
+          <h4 className="line-clamp-2 text-base font-bold tracking-tight text-[#0F172A] transition-colors group-hover:text-[#00B4D8]">
+            {place.name}
+          </h4>
 
-      <div className="p-5">
-        <h3 className="line-clamp-2 text-lg font-bold text-slate-900">
-          {place.name}
-        </h3>
+          {place.address && (
+            <div className="mt-2.5 flex items-start gap-1.5 text-xs font-medium text-slate-500">
+              <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#00B4D8]" />
+              <span className="line-clamp-2">{place.address}</span>
+            </div>
+          )}
+        </div>
 
-        {place.address && (
-          <p className="mt-3 line-clamp-2 text-sm text-slate-500">
-            {place.address}
-          </p>
-        )}
-
-        <div className="mt-5 flex items-center justify-between gap-3">
+        <div className="mt-5 flex items-center gap-2 pt-3 border-t border-slate-100">
           <a
-            href={`https://www.google.com/maps/search/?api=1&query=${place.lat},${place.lon}`}
+            href={`https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lon}`}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+            className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-full bg-[#00B4D8] py-2 px-3 text-xs font-bold text-white shadow-sm transition duration-200 hover:bg-[#0096C7]"
           >
-            <Navigation className="h-4 w-4" />
-            View Map
+            <Navigation className="h-3.5 w-3.5" />
+            Directions
           </a>
+
+          {place.phone && (
+            <a
+              href={`tel:${place.phone}`}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-600 transition hover:bg-slate-100"
+              title="Call"
+            >
+              <Phone className="h-3.5 w-3.5" />
+            </a>
+          )}
 
           {place.website && (
             <a
               href={place.website}
               target="_blank"
               rel="noreferrer"
-              className="text-sm font-semibold text-sky-600 hover:text-sky-700"
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-600 transition hover:bg-slate-100"
+              title="Website"
             >
-              Website
+              <Globe className="h-3.5 w-3.5" />
             </a>
           )}
         </div>
       </div>
-    </div>
+    </article>
   );
 }
 
 /* =========================================================
-   EMPTY MESSAGE
+FEATURE CARD COMPONENT
 ========================================================= */
-
-function EmptyMessage({
-  message,
-}: {
-  message: string;
-}) {
+function FeatureCard({ icon, title, description }: FeatureCardProps) {
   return (
-    <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
-      {message}
-    </div>
-  );
-}
-
-/* =========================================================
-   FEATURE CARD
-========================================================= */
-
-function FeatureCard({
-  icon,
-  title,
-  description,
-}: FeatureCardProps) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-6 transition duration-300 hover:-translate-y-1 hover:shadow-lg">
-      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-sky-100 text-sky-600">
+    <div className="group relative overflow-hidden rounded-2xl border border-white bg-white/80 p-7 shadow-md transition-all duration-300 hover:-translate-y-1 hover:shadow-xl">
+      <div className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-full bg-cyan-50 p-3 transition duration-300 group-hover:scale-110">
         {icon}
       </div>
 
-      <h3 className="mt-5 text-lg font-bold text-slate-900">
-        {title}
-      </h3>
+      <h4 className="text-lg font-bold text-[#0F172A]">{title}</h4>
 
-      <p className="mt-2 text-sm leading-6 text-slate-600">
+      <p className="mt-2 text-sm leading-relaxed text-slate-500">
         {description}
       </p>
+
+      <div className="mt-4 flex items-center gap-1 text-xs font-bold text-[#00B4D8] opacity-0 transition-opacity group-hover:opacity-100">
+        Explore feature <ArrowRight className="h-3.5 w-3.5" />
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+EMPTY STATE COMPONENT
+========================================================= */
+function EmptyState({ message }: { message: string }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 p-12 text-center backdrop-blur-sm">
+      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100">
+        <MapPin className="h-6 w-6 text-slate-400" />
+      </div>
+      <p className="mt-3 text-sm font-semibold text-slate-500">{message}</p>
     </div>
   );
 }
