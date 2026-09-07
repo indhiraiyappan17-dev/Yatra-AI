@@ -9,32 +9,116 @@ app.use(cors());
 app.use(express.json());
 
 /* =========================================================
-   HELPER
+   CONSTANTS
 ========================================================= */
 
-function getFallbackImage(type = "place") {
-  const normalizedType = String(type).toLowerCase();
+const USER_AGENT = "YatraAI-Tourism-App/1.0";
 
-  if (
-    normalizedType.includes("hotel") ||
-    normalizedType.includes("guest_house") ||
-    normalizedType.includes("hostel")
-  ) {
-    return "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=1000&q=80";
+const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
+const WIKIMEDIA_API = "https://commons.wikimedia.org/w/api.php";
+
+/* =========================================================
+   HELPER FUNCTIONS
+========================================================= */
+
+function getAddress(tags) {
+  const parts = [
+    tags["addr:housenumber"],
+    tags["addr:street"],
+    tags["addr:suburb"],
+    tags["addr:city"] ||
+      tags["addr:town"] ||
+      tags["addr:village"],
+    tags["addr:postcode"],
+    tags["addr:state"],
+  ].filter(Boolean);
+
+  return parts.join(", ");
+}
+
+function getPlaceType(tags) {
+  if (tags.tourism) {
+    return tags.tourism;
   }
 
-  if (
-    normalizedType.includes("restaurant") ||
-    normalizedType.includes("fast_food")
-  ) {
-    return "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1000&q=80";
+  if (tags.historic) {
+    return tags.historic;
   }
 
-  if (normalizedType.includes("cafe")) {
-    return "https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=1000&q=80";
+  if (tags.amenity) {
+    return tags.amenity;
   }
 
-  return "https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=1000&q=80";
+  if (tags.leisure) {
+    return tags.leisure;
+  }
+
+  return "place";
+}
+
+function getPlaceName(tags) {
+  return (
+    tags.name ||
+    tags["name:en"] ||
+    tags["official_name"] ||
+    ""
+  ).trim();
+}
+
+function getWebsite(tags) {
+  return (
+    tags.website ||
+    tags["contact:website"] ||
+    tags.url ||
+    ""
+  ).trim();
+}
+
+function getPhone(tags) {
+  return (
+    tags.phone ||
+    tags["contact:phone"] ||
+    ""
+  ).trim();
+}
+
+function getImageFromOSM(tags) {
+  if (tags.image) {
+    return tags.image;
+  }
+
+  if (tags.wikimedia_commons) {
+    return null;
+  }
+
+  return null;
+}
+
+function getGoogleMapsUrl(lat, lon) {
+  return `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
+}
+
+function getGoogleDirectionsUrl(lat, lon) {
+  return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`;
+}
+
+function calculateDistanceKm(lat1, lon1, lat2, lon2) {
+  const earthRadius = 6371;
+
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+
+  const c =
+    2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return earthRadius * c;
 }
 
 /* =========================================================
@@ -65,14 +149,14 @@ app.get("/api/search", async (req, res) => {
 
   try {
     const url =
-      "https://nominatim.openstreetmap.org/search" +
+      NOMINATIM_URL +
       `?q=${encodeURIComponent(query)}` +
       "&format=json" +
       "&limit=1";
 
     const response = await fetch(url, {
       headers: {
-        "User-Agent": "YatraAI-Tourism-App/1.0",
+        "User-Agent": USER_AGENT,
       },
     });
 
@@ -93,9 +177,15 @@ app.get("/api/search", async (req, res) => {
 
     res.json({
       success: true,
-      name: location.display_name?.split(",")[0] || query,
+
+      name:
+        location.display_name?.split(",")[0] ||
+        query,
+
       display_name: location.display_name,
+
       lat: Number(location.lat),
+
       lon: Number(location.lon),
     });
   } catch (error) {
@@ -109,7 +199,7 @@ app.get("/api/search", async (req, res) => {
 });
 
 /* =========================================================
-   NEARBY PLACES
+   REAL TOURIST PLACES
    Uses OpenStreetMap Overpass API
 ========================================================= */
 
@@ -126,30 +216,37 @@ app.get("/api/places", async (req, res) => {
 
   try {
     const overpassQuery = `
-      [out:json][timeout:25];
+      [out:json][timeout:30];
 
       (
         nwr["tourism"](around:5000,${lat},${lon});
+
+        nwr["historic"](around:5000,${lat},${lon});
+
+        nwr["leisure"="park"](around:5000,${lat},${lon});
+
+        nwr["leisure"="garden"](around:5000,${lat},${lon});
+
         nwr["amenity"="restaurant"](around:5000,${lat},${lon});
+
         nwr["amenity"="cafe"](around:5000,${lat},${lon});
+
         nwr["amenity"="fast_food"](around:5000,${lat},${lon});
-        nwr["tourism"="hotel"](around:5000,${lat},${lon});
       );
 
       out center tags;
     `;
 
-    const response = await fetch(
-      "https://overpass-api.de/api/interpreter",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "text/plain",
-          "User-Agent": "YatraAI-Tourism-App/1.0",
-        },
-        body: overpassQuery,
-      }
-    );
+    const response = await fetch(OVERPASS_URL, {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "text/plain",
+        "User-Agent": USER_AGENT,
+      },
+
+      body: overpassQuery,
+    });
 
     if (!response.ok) {
       throw new Error("Overpass API request failed.");
@@ -162,59 +259,119 @@ app.get("/api/places", async (req, res) => {
         const tags = element.tags || {};
 
         const elementLat =
-          element.lat ?? element.center?.lat;
+          element.lat ??
+          element.center?.lat;
 
         const elementLon =
-          element.lon ?? element.center?.lon;
+          element.lon ??
+          element.center?.lon;
 
-        let type = "place";
+        const placeLat = Number(elementLat);
+        const placeLon = Number(elementLon);
 
-        if (tags.tourism) {
-          type = tags.tourism;
-        } else if (tags.amenity) {
-          type = tags.amenity;
+        const name = getPlaceName(tags);
+
+        if (
+          !name ||
+          !Number.isFinite(placeLat) ||
+          !Number.isFinite(placeLon)
+        ) {
+          return null;
         }
 
-        return {
-          id: element.id,
+        const type = getPlaceType(tags);
 
-          name:
-            tags.name ||
-            tags["name:en"] ||
-            "Unnamed place",
+        const distance = calculateDistanceKm(
+          lat,
+          lon,
+          placeLat,
+          placeLon
+        );
+
+        const osmUrl =
+          `https://www.openstreetmap.org/` +
+          `${element.type}/${element.id}`;
+
+        return {
+          id: `${element.type}-${element.id}`,
+
+          name,
 
           type,
 
-          lat: Number(elementLat),
-          lon: Number(elementLon),
+          category: type,
 
-          address:
-            tags["addr:street"] ||
-            tags["addr:city"] ||
-            "",
+          lat: placeLat,
 
-          website:
-            tags.website ||
-            tags["contact:website"] ||
-            "",
+          lon: placeLon,
 
-          phone:
-            tags.phone ||
-            tags["contact:phone"] ||
-            "",
+          address: getAddress(tags),
+
+          website: getWebsite(tags),
+
+          phone: getPhone(tags),
+
+          image: getImageFromOSM(tags),
+
+          wikimedia_commons:
+            tags.wikimedia_commons || "",
+
+          osm_url: osmUrl,
+
+          maps_url:
+            getGoogleMapsUrl(
+              placeLat,
+              placeLon
+            ),
+
+          directions_url:
+            getGoogleDirectionsUrl(
+              placeLat,
+              placeLon
+            ),
+
+          distance_km:
+            Number(distance.toFixed(2)),
         };
       })
-      .filter(
-        (place) =>
-          place.name !== "Unnamed place" &&
-          Number.isFinite(place.lat) &&
-          Number.isFinite(place.lon)
-      );
+      .filter(Boolean);
+
+    /* =====================================================
+       REMOVE DUPLICATES
+    ===================================================== */
+
+    const uniquePlaces = [];
+
+    const seen = new Set();
+
+    for (const place of places) {
+      const key =
+        `${place.name.toLowerCase()}-` +
+        `${place.lat.toFixed(5)}-` +
+        `${place.lon.toFixed(5)}`;
+
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniquePlaces.push(place);
+      }
+    }
+
+    /* =====================================================
+       SORT NEAREST FIRST
+    ===================================================== */
+
+    uniquePlaces.sort(
+      (a, b) =>
+        a.distance_km -
+        b.distance_km
+    );
 
     res.json({
       success: true,
-      count: places.length,
-      places,
+
+      count: uniquePlaces.length,
+
+      places: uniquePlaces,
     });
   } catch (error) {
     console.error("Places API error:", error);
@@ -227,13 +384,12 @@ app.get("/api/places", async (req, res) => {
 });
 
 /* =========================================================
-   REAL PLACE IMAGE SEARCH
+   REAL PLACE IMAGE
    Uses Wikimedia Commons
 ========================================================= */
 
 app.get("/api/image", async (req, res) => {
   const query = String(req.query.q || "").trim();
-  const type = String(req.query.type || "place").trim();
 
   if (!query) {
     return res.status(400).json({
@@ -243,107 +399,119 @@ app.get("/api/image", async (req, res) => {
   }
 
   try {
-    /*
-      We try multiple search queries.
+    const cleanQuery = query
+      .replace(
+        /\b(attraction|museum|hotel|restaurant|cafe|viewpoint|park|monument|place)\b/gi,
+        ""
+      )
+      .trim();
 
-      Example:
-      "Vivekananda Rock Memorial attraction"
-      "Vivekananda Rock Memorial"
-      "Kanyakumari tourism"
-    */
-
-    const searchQueries = [
-      query,
-      query.replace(/\b(attraction|hotel|restaurant|cafe|viewpoint)\b/gi, "").trim(),
-    ];
-
-    let imageUrl = null;
-
-    for (const searchQuery of searchQueries) {
-      if (!searchQuery) {
-        continue;
-      }
-
-      const url =
-        "https://commons.wikimedia.org/w/api.php" +
-        "?action=query" +
-        "&generator=search" +
-        `&gsrsearch=${encodeURIComponent(searchQuery)}` +
-        "&gsrnamespace=6" +
-        "&gsrlimit=3" +
-        "&prop=imageinfo" +
-        "&iiprop=url" +
-        "&iiurlwidth=1000" +
-        "&format=json" +
-        "&origin=*";
-
-      const response = await fetch(url, {
-        headers: {
-          "User-Agent": "YatraAI-Tourism-App/1.0",
-        },
+    if (!cleanQuery) {
+      return res.json({
+        success: true,
+        image: null,
+        source: null,
       });
-
-      if (!response.ok) {
-        continue;
-      }
-
-      const data = await response.json();
-
-      const pages = data.query?.pages;
-
-      if (!pages) {
-        continue;
-      }
-
-      const pageList = Object.values(pages);
-
-      for (const page of pageList) {
-        const info = page?.imageinfo?.[0];
-
-        const candidate =
-          info?.thumburl ||
-          info?.url ||
-          null;
-
-        if (candidate) {
-          imageUrl = candidate;
-          break;
-        }
-      }
-
-      if (imageUrl) {
-        break;
-      }
     }
 
-    /*
-      If Wikimedia doesn't have an image,
-      return a category-based fallback.
-    */
+    const url =
+      WIKIMEDIA_API +
+      "?action=query" +
+      "&generator=search" +
+      `&gsrsearch=${encodeURIComponent(cleanQuery)}` +
+      "&gsrnamespace=6" +
+      "&gsrlimit=10" +
+      "&prop=imageinfo" +
+      "&iiprop=url" +
+      "&iiurlwidth=1000" +
+      "&format=json" +
+      "&origin=*";
 
-    if (!imageUrl) {
-      imageUrl = getFallbackImage(type);
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": USER_AGENT,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        "Wikimedia image search failed."
+      );
+    }
+
+    const data = await response.json();
+
+    const pages =
+      data.query?.pages || {};
+
+    const pageList =
+      Object.values(pages);
+
+    const searchWords =
+      cleanQuery
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(
+          (word) =>
+            word.length >= 3
+        );
+
+    let bestImage = null;
+
+    for (const page of pageList) {
+      const title =
+        String(page.title || "")
+          .toLowerCase();
+
+      const matchedWords =
+        searchWords.filter(
+          (word) =>
+            title.includes(word)
+        );
+
+      if (
+        matchedWords.length === 0
+      ) {
+        continue;
+      }
+
+      const info =
+        page.imageinfo?.[0];
+
+      const candidate =
+        info?.thumburl ||
+        info?.url ||
+        null;
+
+      if (!candidate) {
+        continue;
+      }
+
+      bestImage = candidate;
+      break;
     }
 
     res.json({
       success: true,
-      image: imageUrl,
-      source: imageUrl.includes("wikimedia")
+
+      image: bestImage,
+
+      source: bestImage
         ? "Wikimedia Commons"
-        : "Fallback",
+        : null,
     });
   } catch (error) {
-    console.error("Image search error:", error);
-
-    /*
-      Even if Wikimedia fails completely,
-      the frontend still receives an image.
-    */
+    console.error(
+      "Image search error:",
+      error
+    );
 
     res.json({
       success: true,
-      image: getFallbackImage(type),
-      source: "Fallback",
+
+      image: null,
+
+      source: null,
     });
   }
 });
@@ -357,10 +525,14 @@ app.get("/api/weather", async (req, res) => {
   const lat = Number(req.query.lat);
   const lon = Number(req.query.lon);
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+  if (
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lon)
+  ) {
     return res.status(400).json({
       success: false,
-      error: "Valid latitude and longitude are required.",
+      error:
+        "Valid latitude and longitude are required.",
     });
   }
 
@@ -372,24 +544,34 @@ app.get("/api/weather", async (req, res) => {
       "&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m" +
       "&timezone=auto";
 
-    const response = await fetch(url);
+    const response =
+      await fetch(url);
 
     if (!response.ok) {
-      throw new Error("Weather API request failed.");
+      throw new Error(
+        "Weather API request failed."
+      );
     }
 
-    const data = await response.json();
+    const data =
+      await response.json();
 
     res.json({
       success: true,
-      weather: data.current,
+
+      weather:
+        data.current,
     });
   } catch (error) {
-    console.error("Weather API error:", error);
+    console.error(
+      "Weather API error:",
+      error
+    );
 
     res.status(500).json({
       success: false,
-      error: "Unable to load weather information.",
+      error:
+        "Unable to load weather information.",
     });
   }
 });
