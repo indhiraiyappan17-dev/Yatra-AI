@@ -1,28 +1,35 @@
 import "dotenv/config";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-
-const GEMINI_URL =
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
-
+/*
+ * Gemini configuration
+ * Read environment variables when the request is made
+ * to avoid stale values during module loading.
+ */
+const DEFAULT_GEMINI_MODEL = "gemini-3.6-flash";
 
 /*
  * Common function to communicate with Gemini API
  */
 async function callGemini(prompt, systemInstruction = "") {
-  if (!GEMINI_API_KEY) {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  const model =
+    process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
+
+  if (!apiKey) {
     throw new Error(
       "GEMINI_API_KEY is missing. Please add it to the .env file."
     );
   }
 
-  const response = await fetch(GEMINI_URL, {
+  const geminiUrl =
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+  const response = await fetch(geminiUrl, {
     method: "POST",
 
     headers: {
       "Content-Type": "application/json",
-      "x-goog-api-key": GEMINI_API_KEY,
+      "x-goog-api-key": apiKey,
     },
 
     body: JSON.stringify({
@@ -133,7 +140,11 @@ export async function generateChatResponse({
     ? history
         .slice(-10)
         .map((item) => {
-          const role = item.role === "assistant" ? "Assistant" : "User";
+          const role =
+            item.role === "assistant"
+              ? "Assistant"
+              : "User";
+
           return `${role}: ${item.content || ""}`;
         })
         .join("\n")
@@ -153,10 +164,11 @@ Current user message:
 ${message}
 
 Answer the user's question using the verified tourism data when relevant.
+
 If the requested information is not present in the verified data,
 do not invent it.
 
-Give a clear and helpful response.
+Give a clear, friendly and useful response.
 `;
 
   return await callGemini(
@@ -243,6 +255,9 @@ Practical Tips
 - Budget guidance
 
 Keep the itinerary practical, readable and easy to follow.
+
+Budget values must be treated as approximate planning estimates,
+not guaranteed prices.
 `;
 
   return await callGemini(
@@ -253,6 +268,7 @@ Keep the itinerary practical, readable and easy to follow.
 
 
 /*
- * Export the Gemini model name for server-side use
+ * Export the currently configured Gemini model.
  */
-export { GEMINI_MODEL };
+export const GEMINI_MODEL =
+  process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;

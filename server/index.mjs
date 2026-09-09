@@ -2,7 +2,13 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 
+import {
+  generateChatResponse,
+  generateItinerary,
+} from "./gemini.mjs";
+
 const app = express();
+
 const port = Number(process.env.PORT || 5000);
 
 app.use(cors());
@@ -62,7 +68,7 @@ app.get("/api/search", async (req, res) => {
 
     const location = data[0];
 
-    res.json({
+    return res.json({
       success: true,
       name: location.display_name?.split(",")[0] || query,
       display_name: location.display_name,
@@ -72,7 +78,7 @@ app.get("/api/search", async (req, res) => {
   } catch (error) {
     console.error("Destination search error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "Unable to search destination.",
     });
@@ -98,7 +104,6 @@ app.get("/api/places", async (req, res) => {
   try {
     const overpassQuery = `
       [out:json][timeout:25];
-
       (
         nwr["tourism"](around:5000,${lat},${lon});
         nwr["amenity"="restaurant"](around:5000,${lat},${lon});
@@ -106,7 +111,6 @@ app.get("/api/places", async (req, res) => {
         nwr["amenity"="fast_food"](around:5000,${lat},${lon});
         nwr["tourism"="hotel"](around:5000,${lat},${lon});
       );
-
       out center tags;
     `;
 
@@ -181,12 +185,10 @@ app.get("/api/places", async (req, res) => {
             "",
 
           wikipedia:
-            tags.wikipedia ||
-            "",
+            tags.wikipedia || "",
 
           wikimedia_commons:
-            tags.wikimedia_commons ||
-            "",
+            tags.wikimedia_commons || "",
         };
       })
       .filter(
@@ -196,7 +198,7 @@ app.get("/api/places", async (req, res) => {
           Number.isFinite(place.lon)
       );
 
-    res.json({
+    return res.json({
       success: true,
       count: places.length,
       places,
@@ -204,9 +206,101 @@ app.get("/api/places", async (req, res) => {
   } catch (error) {
     console.error("Places API error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "Unable to load nearby places.",
+    });
+  }
+});
+
+/* =========================================================
+   GEMINI AI CHATBOT
+========================================================= */
+
+app.post("/api/ai/chat", async (req, res) => {
+  try {
+    const {
+      message,
+      destination = "",
+      context = "",
+      history = [],
+    } = req.body || {};
+
+    if (!message || !String(message).trim()) {
+      return res.status(400).json({
+        success: false,
+        error: "Chat message is required.",
+      });
+    }
+
+    const reply = await generateChatResponse({
+      message: String(message),
+      destination: String(destination || ""),
+      context: String(context || ""),
+      history: Array.isArray(history) ? history : [],
+    });
+
+    return res.json({
+      success: true,
+      reply,
+    });
+  } catch (error) {
+    console.error("Gemini chatbot error:", error);
+
+    return res.status(500).json({
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unable to get response from Gemini.",
+    });
+  }
+});
+
+/* =========================================================
+   GEMINI AI ITINERARY
+========================================================= */
+
+app.post("/api/ai/itinerary", async (req, res) => {
+  try {
+    const {
+      destination,
+      days = 3,
+      budget = "moderate",
+      travelType = "general",
+      interests = "",
+      context = "",
+    } = req.body || {};
+
+    if (!destination || !String(destination).trim()) {
+      return res.status(400).json({
+        success: false,
+        error: "Destination is required.",
+      });
+    }
+
+    const itinerary = await generateItinerary({
+      destination: String(destination),
+      days,
+      budget: String(budget || "moderate"),
+      travelType: String(travelType || "general"),
+      interests: String(interests || ""),
+      context: String(context || ""),
+    });
+
+    return res.json({
+      success: true,
+      itinerary,
+    });
+  } catch (error) {
+    console.error("Gemini itinerary error:", error);
+
+    return res.status(500).json({
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unable to generate itinerary.",
     });
   }
 });
@@ -244,17 +338,6 @@ function isBusinessType(type) {
 
 /* =========================================================
    EXACT IMAGE TITLE MATCH
-
-   For hotels/restaurants/cafes:
-   require a much stronger match.
-
-   This prevents:
-
-   Hotel Rockfort View
-        ↓
-   Rockfort Ucchi Pillayar Temple
-
-   from being accepted.
 ========================================================= */
 
 function isVerifiedPlaceMatch(title, placeName, type) {
@@ -267,31 +350,9 @@ function isVerifiedPlaceMatch(title, placeName, type) {
 
   const business = isBusinessType(type);
 
-  /* -------------------------------------------------------
-     BUSINESS PLACES
-
-     Hotels/restaurants usually do not have reliable
-     Wikimedia images.
-
-     Therefore require the complete place name.
-  ------------------------------------------------------- */
-
   if (business) {
-    const exactName = normalizedPlace;
-
-    if (!normalizedTitle.includes(exactName)) {
-      return false;
-    }
-
-    return true;
+    return normalizedTitle.includes(normalizedPlace);
   }
-
-  /* -------------------------------------------------------
-     TOURIST PLACES
-
-     Tourist attractions can have slightly different
-     Wikipedia/Wikimedia naming.
-  ------------------------------------------------------- */
 
   if (normalizedTitle.includes(normalizedPlace)) {
     return true;
@@ -381,37 +442,30 @@ function isCategoryCompatible(title, type) {
     normalizedType.includes("cafe") ||
     normalizedType.includes("fast food");
 
-  const titleLooksTourist =
-    touristWords.some((word) =>
-      text.includes(word)
-    );
+  const titleLooksTourist = touristWords.some(
+    (word) => text.includes(word)
+  );
 
-  const titleLooksHotel =
-    hotelWords.some((word) =>
-      text.includes(word)
-    );
+  const titleLooksHotel = hotelWords.some(
+    (word) => text.includes(word)
+  );
 
-  const titleLooksFood =
-    foodWords.some((word) =>
-      text.includes(word)
-    );
+  const titleLooksFood = foodWords.some(
+    (word) => text.includes(word)
+  );
 
-  /* Hotel cannot receive tourist attraction image. */
   if (isHotel && titleLooksTourist) {
     return false;
   }
 
-  /* Food cannot receive tourist attraction image. */
   if (isFood && titleLooksTourist) {
     return false;
   }
 
-  /* Hotel should not receive restaurant image. */
   if (isHotel && titleLooksFood) {
     return false;
   }
 
-  /* Restaurant should not receive hotel image. */
   if (isFood && titleLooksHotel) {
     return false;
   }
@@ -425,9 +479,6 @@ function isCategoryCompatible(title, type) {
 
    IMPORTANT:
    No generic fallback image.
-
-   If the image cannot be verified,
-   image = null.
 ========================================================= */
 
 app.get("/api/image", async (req, res) => {
@@ -448,18 +499,6 @@ app.get("/api/image", async (req, res) => {
     });
   }
 
-  /* -------------------------------------------------------
-     Extract the actual place name.
-
-     Example:
-
-     "Hotel Rockfort View hotel Trichy"
-
-     becomes approximately:
-
-     "Rockfort View Trichy"
-  ------------------------------------------------------- */
-
   let placeName = query;
 
   const categoryPattern =
@@ -470,16 +509,10 @@ app.get("/api/image", async (req, res) => {
     .replace(/\s+/g, " ")
     .trim();
 
-  /*
-     Remove destination from the place name only if
-     it was added by the frontend as a separate part.
-  */
-
   if (destination) {
-    const destinationWords =
-      normalizeText(destination)
-        .split(" ")
-        .filter((word) => word.length >= 3);
+    const destinationWords = normalizeText(destination)
+      .split(" ")
+      .filter((word) => word.length >= 3);
 
     let possibleName = placeName;
 
@@ -505,25 +538,6 @@ app.get("/api/image", async (req, res) => {
   console.log(
     `Image search started: "${placeName}" | type="${type}" | destination="${destination}"`
   );
-
-  /* =======================================================
-     BUSINESS PLACES
-
-     Do NOT perform broad Wikimedia searching.
-
-     This is the most important fix.
-
-     A generic Wikimedia search is likely to return:
-       Rockfort Temple
-       Rockfort Monument
-       Rockfort Fort
-
-     when searching:
-       Hotel Rockfort View
-
-     So for business places we require an exact title
-     match and only search the exact phrase.
-  ======================================================= */
 
   const business = isBusinessType(type);
 
@@ -580,18 +594,13 @@ app.get("/api/image", async (req, res) => {
         continue;
       }
 
-      const pageList =
-        Object.values(pages);
+      const pageList = Object.values(pages);
 
       for (const page of pageList) {
-        const title =
-          String(page.title || "");
+        const title = String(page.title || "");
 
         if (
-          !isCategoryCompatible(
-            title,
-            type
-          )
+          !isCategoryCompatible(title, type)
         ) {
           continue;
         }
@@ -606,8 +615,7 @@ app.get("/api/image", async (req, res) => {
           continue;
         }
 
-        const info =
-          page.imageinfo?.[0];
+        const info = page.imageinfo?.[0];
 
         const imageUrl =
           info?.thumburl ||
@@ -673,18 +681,13 @@ app.get("/api/image", async (req, res) => {
         continue;
       }
 
-      const pageList =
-        Object.values(pages);
+      const pageList = Object.values(pages);
 
       for (const page of pageList) {
-        const title =
-          String(page.title || "");
+        const title = String(page.title || "");
 
         if (
-          !isCategoryCompatible(
-            title,
-            type
-          )
+          !isCategoryCompatible(title, type)
         ) {
           continue;
         }
@@ -748,7 +751,10 @@ app.get("/api/weather", async (req, res) => {
   const lat = Number(req.query.lat);
   const lon = Number(req.query.lon);
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+  if (
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lon)
+  ) {
     return res.status(400).json({
       success: false,
       error:
@@ -774,7 +780,7 @@ app.get("/api/weather", async (req, res) => {
 
     const data = await response.json();
 
-    res.json({
+    return res.json({
       success: true,
       weather: data.current,
     });
@@ -784,7 +790,7 @@ app.get("/api/weather", async (req, res) => {
       error
     );
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error:
         "Unable to load weather information.",
@@ -795,7 +801,7 @@ app.get("/api/weather", async (req, res) => {
 /* =========================================================
    START SERVER
 ========================================================= */
-
+console.log("GEMINI MODEL:", process.env.GEMINI_MODEL);
 app.listen(port, () => {
   console.log(
     `YatraAI backend running on http://localhost:${port}`
